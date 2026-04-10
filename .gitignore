@@ -1,0 +1,6 @@
+node_modules/
+.env
+sources/
+voice-profile.json
+voice-exemplars.md
+*.log

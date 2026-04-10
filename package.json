@@ -1,0 +1,26 @@
+{
+  "name": "voice-distill",
+  "version": "0.1.0",
+  "description": "从你的文章中提取写作指纹 — Extract your writing voice from articles",
+  "type": "module",
+  "scripts": {
+    "distill": "node scripts/distill.mjs",
+    "export:bear": "node scripts/export_bear.mjs",
+    "analyze:compute": "node scripts/distill_compute.mjs",
+    "analyze:llm": "node scripts/distill_llm.mjs",
+    "synthesize": "node scripts/distill_synthesize.mjs"
+  },
+  "keywords": [
+    "voice",
+    "writing-style",
+    "distillation",
+    "ai",
+    "llm",
+    "chinese"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^12.8.0",
+    "nodejieba": "^3.5.8"
+  }
+}
