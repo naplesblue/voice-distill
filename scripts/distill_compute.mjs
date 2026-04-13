@@ -153,6 +153,62 @@ log(`[L1] 高频词 top 10: ${topWords.slice(0, 10).map(w => w.word).join('、')
 log(`[L1] 人称分布: ${Object.entries(pronounRatios).map(([p, r]) => `${p}:${r}`).join(' ')}`);
 log(`[L1] 口语词 top 10: ${sortedColloquials.slice(0, 10).map(([w]) => w).join('、')}`);
 
+// 7. AI 八股检测（反向禁令）
+// AI 最常用但人类作者往往不用的表达——用于构建 forbidden_patterns
+const AI_CLICHES = [
+  // 过渡八股
+  '总而言之', '综上所述', '值得一提的是', '不得不说', '众所周知',
+  '毋庸置疑', '不可否认', '毫无疑问', '显而易见', '由此可见',
+  '换言之', '简而言之', '总的来说', '归根到底',
+  // 强调八股
+  '非常重要的是', '关键在于', '核心问题是', '本质上来说',
+  '从某种意义上说', '从根本上说', '在很大程度上',
+  // 让步八股
+  '诚然', '固然', '尽管如此', '话虽如此',
+  // 结尾八股
+  '让我们拭目以待', '未来可期', '任重道远', '道阻且长',
+  '希望本文能够', '以上就是', '感谢阅读',
+  // 情感八股
+  '令人惊叹', '令人深思', '发人深省', '引人深思', '耐人寻味',
+  '不禁让人', '让人不禁',
+  // 修辞八股
+  '就像一把双刃剑', '是一个硬币的两面', '站在巨人的肩膀上',
+  '打开了潘多拉的盒子', '是一片蓝海',
+];
+
+const aiClicheFreq = {};
+let authorAvoidsCount = 0;
+let authorUsesCount = 0;
+
+for (const cliche of AI_CLICHES) {
+  let count = 0;
+  for (const article of corpus) {
+    const escaped = cliche.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const matches = article.body.match(new RegExp(escaped, 'g'));
+    count += (matches?.length || 0);
+  }
+  aiClicheFreq[cliche] = {
+    totalOccurrences: count,
+    per1000chars: Math.round(count / totalChars * 10000) / 10,
+    status: count === 0 ? 'never' : count <= 2 ? 'rare' : 'used',
+  };
+  if (count === 0) authorAvoidsCount++;
+  else authorUsesCount++;
+}
+
+// 分类汇总
+const aiForbidden = Object.entries(aiClicheFreq)
+  .filter(([, v]) => v.status === 'never')
+  .map(([word]) => word);
+const aiRare = Object.entries(aiClicheFreq)
+  .filter(([, v]) => v.status === 'rare')
+  .map(([word]) => word);
+const aiActuallyUsed = Object.entries(aiClicheFreq)
+  .filter(([, v]) => v.status === 'used')
+  .map(([word, v]) => ({ word, count: v.totalOccurrences }));
+
+log(`[L1] AI 八股：${authorAvoidsCount} 个从不使用，${aiRare.length} 个极少使用，${authorUsesCount} 个偶有使用`);
+
 // ══════════════════════════════════════
 //  L2: 句法签名
 // ══════════════════════════════════════
@@ -318,6 +374,12 @@ const profile = {
     pronounCounts: pronouns,
     punctuation,
     colloquials: Object.fromEntries(sortedColloquials.slice(0, 30)),
+    aiClicheAnalysis: {
+      forbidden: aiForbidden,
+      rare: aiRare,
+      actuallyUsed: aiActuallyUsed,
+      avoidanceRate: `${(authorAvoidsCount / AI_CLICHES.length * 100).toFixed(0)}%`,
+    },
   },
   L2_syntactic: {
     sentenceLength: sentenceStats,

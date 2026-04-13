@@ -98,6 +98,7 @@ async function main() {
   const allJumps = [];
   const allJudgments = [];
   const allAnalogies = [];
+  const judgmentValence = {};  // { tech_product: { positive: 3, negative: 7, ... }, ... }
   const allHumor = [];
   const allSignatureExpr = [];
   const allBestParagraphs = [];
@@ -114,6 +115,16 @@ async function main() {
     if (s.jumps) allJumps.push(...s.jumps);
     if (s.judgments) allJudgments.push(...s.judgments);
     if (s.analogies) allAnalogies.push(...s.analogies);
+
+    // 判断价值倾向统计
+    if (s.judgments) {
+      for (const j of s.judgments) {
+        const cat = j.target_category || 'other';
+        const val = j.valence || 'mixed';
+        if (!judgmentValence[cat]) judgmentValence[cat] = {};
+        judgmentValence[cat][val] = (judgmentValence[cat][val] || 0) + 1;
+      }
+    }
 
     // Style
     const st = a.style || {};
@@ -185,6 +196,12 @@ async function main() {
       tone_descriptions_sample: toneDescriptions.slice(0, 10),
     },
     best_paragraphs: allBestParagraphs.slice(0, 20),
+    ai_cliche_analysis: {
+      forbidden: compute.L1_lexical.aiClicheAnalysis?.forbidden || [],
+      rare: compute.L1_lexical.aiClicheAnalysis?.rare || [],
+      avoidanceRate: compute.L1_lexical.aiClicheAnalysis?.avoidanceRate || 'N/A',
+    },
+    judgment_valence_patterns: judgmentValence,
   };
 
   // ── 合成 Voice Profile ──
@@ -220,6 +237,7 @@ async function main() {
     "argument_flow": "论证方式的描述（演绎/归纳/意识流各占多少，什么时候用哪种）",
     "jump_patterns": ["思维跳跃的典型模式，至少 3 种"],
     "judgment_style": "什么时候下判断、怎么引入判断、判断的力度如何",
+    "judgment_tendencies": "对不同类型的对象（大公司/产品/个人/趋势/文化现象），这个作者的判断倾向是什么。根据 judgment_valence_patterns 数据，描述具体模式。例如：'对大公司产品默认质疑，对独立开发者默认共情，对行业趋势先肯定再泼冷水'",
     "information_priority": "面对一堆信息时，这个人会先说什么、详写什么、略掉什么"
   },
   "persona": {
@@ -230,7 +248,12 @@ async function main() {
   },
   "writing_rules": [
     "从以上分析中提炼出 10-15 条最具操作性的写作规则，按重要性排序。每条规则要具体到可以直接遵循，而不是抽象原则。例如：'段落之间直接硬切，不用"但是""然而""所以"等过渡词' 而不是 '过渡要自然'"
-  ]
+  ],
+  "forbidden_patterns": {
+    "never_use": ["从 ai_cliche_analysis.forbidden 数据中，列出这个作者绝对不会使用的 AI 八股表达（只列数据中 status=never 的）"],
+    "use_instead": ["当 AI 想用这些禁止表达时，根据这个作者的实际用词习惯，说明替代方式。例如：不用综上所述，直接硬切下一段；不用值得一提的是，直接说事实"],
+    "meta_rule": "一句话总结这个作者对书面腔/官方腔的整体态度"
+  }
 }
 
 只输出 JSON。`;
@@ -248,14 +271,67 @@ async function main() {
     models: { compute: 'nodejieba + statistics', llm: MODEL },
   };
 
-  // 注入计算指标（Profile 里保留原始数据供参考）
+   // 注入计算指标（Profile 里保留原始数据供参考）
   profile._raw_stats = {
     sentenceLength: compute.L2_syntactic.sentenceLength,
     paragraphLength: compute.L2_syntactic.paragraphLength,
     rhythmPatterns: compute.L2_syntactic.rhythmPatterns.slice(0, 10),
     transitionTypes: compute.L2_syntactic.transitionTypes,
     pronounDistribution: compute.L1_lexical.pronounDistribution,
+    aiClicheAnalysis: compute.L1_lexical.aiClicheAnalysis || {},
+    judgmentValence,
   };
+
+  // ── 话题分流 Profile ──
+  const byTopic = {};
+  for (const a of analyses) {
+    const t = a.topic || 'unknown';
+    if (!byTopic[t]) byTopic[t] = [];
+    byTopic[t].push(a);
+  }
+
+  const topicOverrides = {};
+  for (const [topic, articles] of Object.entries(byTopic)) {
+    if (topic === 'unknown' || articles.length < 5) continue;
+
+    // 计算该话题下的特征分布
+    const tOpening = {};
+    const tClosing = {};
+    const tFlow = {};
+    const tReader = {};
+    const tJudgmentTypes = {};
+
+    for (const a of articles) {
+      const s = a.structure || {};
+      const st = a.style || {};
+      if (s.opening_type) tOpening[s.opening_type] = (tOpening[s.opening_type] || 0) + 1;
+      if (s.closing_type) tClosing[s.closing_type] = (tClosing[s.closing_type] || 0) + 1;
+      if (st.argument_flow) tFlow[st.argument_flow] = (tFlow[st.argument_flow] || 0) + 1;
+      if (st.reader_relationship) tReader[st.reader_relationship] = (tReader[st.reader_relationship] || 0) + 1;
+      if (s.judgments) {
+        for (const j of s.judgments) {
+          const jt = j.type || 'unknown';
+          tJudgmentTypes[jt] = (tJudgmentTypes[jt] || 0) + 1;
+        }
+      }
+    }
+
+    topicOverrides[topic] = {
+      sampleSize: articles.length,
+      openingDistribution: normalizeDist(tOpening),
+      closingDistribution: normalizeDist(tClosing),
+      argumentFlowDistribution: normalizeDist(tFlow),
+      readerRelationship: normalizeDist(tReader),
+      judgmentTypeDistribution: normalizeDist(tJudgmentTypes),
+    };
+  }
+
+  if (Object.keys(topicOverrides).length > 0) {
+    profile.topic_overrides = topicOverrides;
+    log(`[Synth] 话题分流: ${Object.entries(topicOverrides).map(([t, v]) => `${t}(${v.sampleSize}篇)`).join(', ')}`);
+  } else {
+    log('[Synth] 话题分流: 无足够样本的话题分组（需每类 ≥5 篇）');
+  }
 
   fs.writeFileSync(PROFILE_OUTPUT, JSON.stringify(profile, null, 2));
   log(`[Synth] → ${PROFILE_OUTPUT}`);

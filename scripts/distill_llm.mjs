@@ -140,7 +140,14 @@ const STRUCTURE_PROMPT = `你是文学评论家，专业分析中文非虚构写
     { "from": "话题A", "to": "话题B", "bridge": "什么触发了这个跳跃" }
   ],
   "judgments": [
-    { "position": "第几段", "content": "作者判断的内容摘要", "signal": "引入判断时用的信号词或句式", "type": "direct|hedged|implied|rhetorical" }
+    {
+      "position": "第几段",
+      "content": "作者判断的内容摘要",
+      "signal": "引入判断时用的信号词或句式",
+      "type": "direct|hedged|implied|rhetorical",
+      "target_category": "tech_product|company|person|trend|culture|self|other",
+      "valence": "positive|negative|mixed|ironic"
+    }
   ],
   "analogies": ["文中使用的类比或比喻，原文摘录"]
 }
@@ -170,6 +177,13 @@ const STYLE_PROMPT = `你是文学风格分析专家，专注中文文体学。
 }
 只输出 JSON。`;
 
+const TOPIC_PROMPT = `对以下中文文章做话题分类。只输出一个 JSON：
+{
+  "primary_topic": "review|essay|tutorial|opinion|story|news_commentary",
+  "topic_confidence": 0.0-1.0
+}
+只输出 JSON。`;
+
 // ── 单篇分析 ──
 async function analyzeOne(article, index, total) {
   const tag = `[${index + 1}/${total}]`;
@@ -184,6 +198,18 @@ async function analyzeOne(article, index, total) {
   const userContent = `标题：${article.title}\n\n${bodyForLLM}`;
 
   try {
+    // Call 0: 话题分类（轻量）
+    log(`${tag} "${title}" 话题分类...`);
+    let topic = 'unknown';
+    try {
+      const topicRaw = await callLLM(TOPIC_PROMPT, userContent, 100);
+      const topicResult = parseJSON(topicRaw);
+      topic = topicResult.primary_topic || 'unknown';
+    } catch {
+      // 话题分类失败不影响主分析
+      topic = 'unknown';
+    }
+
     // Call 1: 结构拆解
     log(`${tag} "${title}" 结构分析...`);
     const structRaw = await callLLM(STRUCTURE_PROMPT, userContent, 1500);
@@ -194,11 +220,12 @@ async function analyzeOne(article, index, total) {
     const styleRaw = await callLLM(STYLE_PROMPT, userContent, 1500);
     const style = parseJSON(styleRaw);
 
-    log(`${tag} ✅ "${title}" — ${structure.opening_type}开头, ${structure.closing_type}结尾, ${style.argument_flow}`);
+    log(`${tag} ✅ "${title}" [${topic}] — ${structure.opening_type}开头, ${structure.closing_type}结尾, ${style.argument_flow}`);
 
     return {
       id: article.id,
       title: article.title,
+      topic,
       bucket: article._bucket,
       charCount: article.charCount,
       timeWeight: article.timeWeight,

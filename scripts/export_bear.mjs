@@ -30,6 +30,8 @@ function cleanBearMarkdown(text) {
   let s = text;
   // 去掉第一行的标题（Bear 会把标题也放在 ZTEXT 里）
   s = s.replace(/^# .+\n+/, '');
+  // 去掉公众号摘要（标题下的第一行通常是文章摘要，不是正文）
+  s = s.replace(/^[^\n]+\n+/, '');
   // 去掉 Bear 标签 #tag# 和 #tag/subtag#
   s = s.replace(/#[^\s#]+#/g, '');
   // 去掉图片 ![](...)
