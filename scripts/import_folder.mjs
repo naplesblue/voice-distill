@@ -13,14 +13,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const OUTPUT_DIR = path.join(ROOT, 'sources', 'voice');
 const SUPPORTED_EXT = new Set(['.md', '.txt', '.markdown', '.text']);
 
 // ── CLI ──
 const args = process.argv.slice(2);
+const authorIdx = args.indexOf('--author');
+const AUTHOR = authorIdx >= 0 ? args[authorIdx + 1] : 'voice';
+const OUTPUT_DIR = path.join(ROOT, 'sources', AUTHOR);
 const minCharsIdx = args.indexOf('--min-chars');
 const MIN_CHARS = minCharsIdx >= 0 ? parseInt(args[minCharsIdx + 1], 10) : 500;
-const inputDir = args.find(a => !a.startsWith('-') && !(minCharsIdx >= 0 && args[minCharsIdx + 1] === a));
+const inputDir = args.find(a => !a.startsWith('-') && !(minCharsIdx >= 0 && args[minCharsIdx + 1] === a) && !(authorIdx >= 0 && args[authorIdx + 1] === a));
 
 if (!inputDir || !fs.existsSync(inputDir)) {
   console.error('用法: node scripts/import_folder.mjs <文件夹路径> [--min-chars N]');

@@ -13,11 +13,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const VOICE_DIR = path.join(ROOT, 'sources', 'voice');
+const args = process.argv.slice(2);
+const authorIdx = args.indexOf('--author');
+const AUTHOR = authorIdx >= 0 ? args[authorIdx + 1] : 'voice';
+const VOICE_DIR = path.join(ROOT, 'sources', AUTHOR);
 const COMPUTE_PATH = path.join(VOICE_DIR, 'compute-profile.json');
 const LLM_PATH = path.join(VOICE_DIR, 'llm-analysis.json');
-const PROFILE_OUTPUT = path.join(ROOT, 'voice-profile.json');
-const EXEMPLARS_OUTPUT = path.join(ROOT, 'voice-exemplars.md');
+// 自己的 profile 输出到项目根目录，外部作者输出到 sources/<author>/
+const PROFILE_OUTPUT = AUTHOR === 'voice'
+  ? path.join(ROOT, 'voice-profile.json')
+  : path.join(VOICE_DIR, 'voice-profile.json');
+const EXEMPLARS_OUTPUT = AUTHOR === 'voice'
+  ? path.join(ROOT, 'voice-exemplars.md')
+  : path.join(VOICE_DIR, 'voice-exemplars.md');
 
 // ── 环境 ──
 const LLM_API_KEY = process.env.LLM_API_KEY;
@@ -203,6 +211,101 @@ async function main() {
     },
     judgment_valence_patterns: judgmentValence,
   };
+
+  // ── 维度提取模式（--extract） ──
+  const extractIdx = args.indexOf('--extract');
+  if (extractIdx >= 0) {
+    const dimension = args[extractIdx + 1];
+    const VALID_DIMS = ['opening', 'closing', 'rhythm', 'argument', 'judgment', 'humor', 'transition'];
+    if (!VALID_DIMS.includes(dimension)) {
+      log(`[ERROR] 无效维度: ${dimension}。支持: ${VALID_DIMS.join(', ')}`);
+      process.exit(1);
+    }
+
+    log(`[Extract] 维度提取模式: ${dimension} (作者: ${AUTHOR})`);
+
+    // 按维度收集原始数据
+    const dimData = {};
+    switch (dimension) {
+      case 'opening':
+        dimData.distribution = normalizeDist(openingDist);
+        dimData.techniques = analyses
+          .map(a => a.structure?.opening_technique).filter(Boolean).slice(0, 20);
+        dimData.samples = analyses
+          .map(a => ({ title: a.title, type: a.structure?.opening_type, technique: a.structure?.opening_technique }))
+          .filter(a => a.type).slice(0, 15);
+        break;
+      case 'closing':
+        dimData.distribution = normalizeDist(closingDist);
+        dimData.techniques = analyses
+          .map(a => a.structure?.closing_technique).filter(Boolean).slice(0, 20);
+        dimData.samples = analyses
+          .map(a => ({ title: a.title, type: a.structure?.closing_type, technique: a.structure?.closing_technique }))
+          .filter(a => a.type).slice(0, 15);
+        break;
+      case 'rhythm':
+        dimData.sentenceLength = compute.L2_syntactic.sentenceLength;
+        dimData.paragraphLength = compute.L2_syntactic.paragraphLength;
+        dimData.sentencesPerParagraph = compute.L2_syntactic.sentencesPerParagraph;
+        dimData.rhythmPatterns = compute.L2_syntactic.rhythmPatterns.slice(0, 10);
+        break;
+      case 'argument':
+        dimData.flowDistribution = normalizeDist(flowDist);
+        dimData.jumpPatterns = allJumps.slice(0, 15);
+        dimData.samples = analyses
+          .map(a => ({ title: a.title, flow: a.style?.argument_flow }))
+          .filter(a => a.flow).slice(0, 15);
+        break;
+      case 'judgment':
+        dimData.judgments = allJudgments.slice(0, 20);
+        dimData.valence = judgmentValence;
+        dimData.samples = analyses
+          .map(a => ({ title: a.title, judgments: a.structure?.judgments?.slice(0, 3) }))
+          .filter(a => a.judgments?.length).slice(0, 10);
+        break;
+      case 'humor':
+        dimData.instances = uniqueHumor.slice(0, 15);
+        dimData.tones = toneDescriptions.slice(0, 10);
+        break;
+      case 'transition':
+        dimData.transitionTypes = compute.L2_syntactic.transitionTypes;
+        dimData.transitionCounts = compute.L2_syntactic.transitionCounts;
+        break;
+    }
+
+    // 用 LLM 生成自然语言描述
+    const EXTRACT_PROMPT = `你是文体学专家。根据以下关于一位作者"${dimension}"维度的分析数据，提炼出 3-5 条可操作的写作技巧规则。
+
+每条规则要具体、可遵循，例如："开头用具体场景铺设，前 3 句必须包含感官细节"。
+
+请输出 JSON：
+{
+  "signature_pattern": "一句话总结这个作者在${dimension}维度上的核心特征",
+  "rules": ["规则1", "规则2", ...],
+  "examples": ["从数据中摘取 2-3 个最佳示例"]
+}
+只输出 JSON。`;
+
+    log(`[Extract] 调用 LLM 提炼 ${dimension} 维度规则...`);
+    const extractRaw = await callLLM(EXTRACT_PROMPT, JSON.stringify(dimData, null, 2), 1500);
+    const extractResult = parseJSON(extractRaw);
+
+    const output = {
+      author: AUTHOR,
+      dimension,
+      extractedAt: new Date().toISOString(),
+      sampleSize: analyses.length,
+      technique: {
+        ...extractResult,
+        _raw: dimData,
+      },
+    };
+
+    const extractPath = path.join(VOICE_DIR, `extract-${dimension}.json`);
+    fs.writeFileSync(extractPath, JSON.stringify(output, null, 2));
+    log(`[Extract] → ${extractPath}`);
+    return;
+  }
 
   // ── 合成 Voice Profile ──
   const SYNTH_PROMPT = `你是语言学家和文体学专家。你的任务是根据对 1282 篇中文公众号文章的多维分析数据，合成一个结构化的「作者声音画像」(Voice Profile)。

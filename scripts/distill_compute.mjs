@@ -13,9 +13,12 @@ import path from 'node:path';
 import nodejieba from 'nodejieba';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const CORPUS_PATH = path.join(ROOT, 'sources', 'voice', 'corpus.json');
-const OUTPUT_PATH = path.join(ROOT, 'sources', 'voice', 'compute-profile.json');
-const verbose = process.argv.includes('--verbose');
+const args = process.argv.slice(2);
+const authorIdx = args.indexOf('--author');
+const AUTHOR = authorIdx >= 0 ? args[authorIdx + 1] : 'voice';
+const CORPUS_PATH = path.join(ROOT, 'sources', AUTHOR, 'corpus.json');
+const OUTPUT_PATH = path.join(ROOT, 'sources', AUTHOR, 'compute-profile.json');
+const verbose = args.includes('--verbose');
 
 function log(msg) { console.error(msg); }
 

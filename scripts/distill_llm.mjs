@@ -15,8 +15,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const CORPUS_PATH = path.join(ROOT, 'sources', 'voice', 'corpus.json');
-const OUTPUT_PATH = path.join(ROOT, 'sources', 'voice', 'llm-analysis.json');
+const authorIdx = process.argv.indexOf('--author');
+const AUTHOR = authorIdx >= 0 ? process.argv[authorIdx + 1] : 'voice';
+const CORPUS_PATH = path.join(ROOT, 'sources', AUTHOR, 'corpus.json');
+const OUTPUT_PATH = path.join(ROOT, 'sources', AUTHOR, 'llm-analysis.json');
 
 // ── 环境 ──
 const LLM_API_KEY = process.env.LLM_API_KEY;
